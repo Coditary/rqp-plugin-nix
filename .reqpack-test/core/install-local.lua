@@ -1,17 +1,34 @@
 return {
-  name = "template install local",
+  name = "nix install local",
   request = {
     action = "install",
-    system = "template",
-    localPath = "/tmp/delta.tgz",
+    system = "nix",
+    localPath = "/tmp/delta-flake",
   },
-  fakeExec = {},
+  fakeExec = {
+    {
+      match = "command -v 'nix' >/dev/null 2>&1",
+      exitCode = 0,
+      stdout = "",
+      stderr = "",
+      success = true,
+    },
+    {
+      match = "nix profile install '/tmp/delta-flake'",
+      exitCode = 0,
+      stdout = "installed\n",
+      stderr = "",
+      success = true,
+    }
+  },
   expect = {
     success = true,
+    commands = {
+      "nix profile install '/tmp/delta-flake'"
+    },
     events = { "installed", "success" },
     eventPayloads = {
-      installed = "{localTarget=true, path=/tmp/delta.tgz}",
-      success = "ok",
+      installed = "{localTarget=true, path=/tmp/delta-flake}",
     },
   }
 }

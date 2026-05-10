@@ -1,10 +1,10 @@
 return {
-  name = "nix install",
+  name = "nix install failure",
   request = {
     action = "install",
     system = "nix",
     packages = {
-      { name = "delta", version = "1.0.0" }
+      { name = "delta" }
     },
   },
   fakeExec = {
@@ -17,17 +17,20 @@ return {
     },
     {
       match = "nix profile install 'nixpkgs#delta'",
-      exitCode = 0,
-      stdout = "installed\n",
-      stderr = "",
-      success = true,
+      exitCode = 1,
+      stdout = "",
+      stderr = "boom\n",
+      success = false,
     }
   },
   expect = {
-    success = true,
+    success = false,
     commands = {
       "nix profile install 'nixpkgs#delta'"
     },
-    events = { "installed", "success" },
+    events = { "failed" },
+    eventPayloads = {
+      failed = "nix install failed",
+    },
   }
 }

@@ -1,8 +1,8 @@
 {
   "formatVersion": 1,
-  "name": "template",
+  "name": "nix",
   "version": "0.1.0",
-  "summary": "Template wrapper plugin",
-  "description": "ReqPack wrapper template bundle",
+  "summary": "ReqPack wrapper for native Nix profile management",
+  "description": "ReqPack Lua plugin that wraps the native Nix package manager through nix profile and nix search.",
   "license": "MIT"
 }
