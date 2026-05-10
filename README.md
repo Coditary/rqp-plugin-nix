@@ -34,5 +34,5 @@ rqp test-plugin --plugin ./run.lua --preset core
 ## Notes
 
 - `installLocal()` treats local path as native Nix installable and forwards it to `nix profile install`
-- package-specific updates rely on Nix profile entry names derived from current profile manifest
+- package-specific updates rely on Nix profile entry names and only run when newer version is detected
 - exact package pinning through separate ReqPack `version` field is not supported by `nix profile`; use explicit Nix installables when needed

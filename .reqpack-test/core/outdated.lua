@@ -20,7 +20,7 @@ return {
       success = true,
     },
     {
-      match = "nix search nixpkgs '^delta$' --json --no-pretty",
+      match = "nix search 'nixpkgs' '^delta$' --json --no-pretty",
       exitCode = 0,
       stdout = "{\"legacyPackages.x86_64-linux.delta\":{\"pname\":\"delta\",\"version\":\"2.0.0\",\"description\":\"Delta package\",\"meta\":{\"homepage\":\"https://example.com/delta\"}}}\n",
       stderr = "",
@@ -31,7 +31,7 @@ return {
     success = true,
     commands = {
       "nix profile list --json --no-pretty",
-      "nix search nixpkgs '^delta$' --json --no-pretty"
+      "nix search 'nixpkgs' '^delta$' --json --no-pretty"
     },
     events = { "outdated" },
     resultCount = 1,

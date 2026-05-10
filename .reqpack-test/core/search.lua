@@ -14,7 +14,7 @@ return {
       success = true,
     },
     {
-      match = "nix search nixpkgs 'delta' --json --no-pretty",
+      match = "nix search 'nixpkgs' 'delta' --json --no-pretty",
       exitCode = 0,
       stdout = "{\"legacyPackages.x86_64-linux.delta\":{\"pname\":\"delta\",\"version\":\"1.0.0\",\"description\":\"Delta package\"}}\n",
       stderr = "",
@@ -24,7 +24,7 @@ return {
   expect = {
     success = true,
     commands = {
-      "nix search nixpkgs 'delta' --json --no-pretty"
+      "nix search 'nixpkgs' 'delta' --json --no-pretty"
     },
     events = { "searched" },
     resultCount = 1,

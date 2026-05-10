@@ -828,22 +828,35 @@ local function regex_escape(value)
     return tostring(value or ""):gsub("([%^%$%(%)%%%.%[%]%*%+%-%?])", "%%%1")
 end
 
-local function extract_search_term(prompt)
-    local normalized = normalize_installable(prompt)
-    local fragment = strip_known_attr_prefix(extract_ref_fragment(normalized))
-    if fragment ~= "" then
-        return fragment
+local function split_installable(installable)
+    local normalized = strip_flake_prefix(normalize_installable(installable))
+    local source_ref, fragment = normalized:match("^(.-)#(.+)$")
+    if source_ref ~= nil then
+        return trim(source_ref), strip_known_attr_prefix(fragment), normalized
     end
-    return trim(prompt)
+    return trim(normalized), "", normalized
 end
 
-local function search_nixpkgs(context, prompt)
+local function extract_search_term(prompt)
+    local source_ref, fragment = split_installable(prompt)
+    if fragment ~= "" then
+        return source_ref, fragment
+    end
+    return NIXPKGS_REF, trim(prompt)
+end
+
+local function search_installable(context, source_ref, prompt)
     local search_term = trim(prompt)
+    local ref = strip_flake_prefix(source_ref)
     if search_term == "" then
         return {}, nil
     end
 
-    local command = "nix search " .. NIXPKGS_REF .. " " .. shell_quote(search_term) .. " --json --no-pretty"
+    if ref == "" then
+        return {}, nil
+    end
+
+    local command = "nix search " .. shell_quote(ref) .. " " .. shell_quote(search_term) .. " --json --no-pretty"
     local result = exec_run(context, command)
     if not result.success then
         return nil, "nix search failed"
@@ -852,14 +865,18 @@ local function search_nixpkgs(context, prompt)
     return parse_search_results(result.stdout)
 end
 
+local function search_nixpkgs(context, prompt)
+    return search_installable(context, NIXPKGS_REF, prompt)
+end
+
 local function exact_or_first_search_result(context, package_name)
-    local search_term = extract_search_term(package_name)
+    local source_ref, search_term = extract_search_term(package_name)
     if search_term == "" then
         return nil
     end
 
     local exact_pattern = "^" .. regex_escape(search_term) .. "$"
-    local exact_results, exact_error = search_nixpkgs(context, exact_pattern)
+    local exact_results, exact_error = search_installable(context, source_ref, exact_pattern)
     if exact_results ~= nil then
         for _, item in ipairs(exact_results) do
             if item.name == search_term or item.relativeAttr == search_term then
@@ -875,7 +892,7 @@ local function exact_or_first_search_result(context, package_name)
         return nil
     end
 
-    local fallback_results = search_nixpkgs(context, search_term)
+    local fallback_results = search_installable(context, source_ref, search_term)
     if fallback_results == nil then
         return nil
     end
@@ -969,7 +986,7 @@ function plugin.getMissingPackages(packages)
                 missing[#missing + 1] = package
             end
         elseif action == "update" then
-            if entry ~= nil then
+            if entry ~= nil and build_outdated_package_info(nil, entry) ~= nil then
                 missing[#missing + 1] = package
             end
         elseif not installed then
@@ -1084,7 +1101,7 @@ function plugin.update(context, packages)
     local updated = {}
     for _, package in ipairs(packages) do
         local entry = find_matching_entry(entries, package)
-        if entry ~= nil then
+        if entry ~= nil and build_outdated_package_info(context, entry) ~= nil then
             targets[#targets + 1] = entry.entryName
             updated[#updated + 1] = package
         end
@@ -1152,14 +1169,14 @@ function plugin.outdated(context)
 end
 
 function plugin.search(context, prompt)
-    local search_term = extract_search_term(prompt)
+    local source_ref, search_term = extract_search_term(prompt)
     if trim(search_term) == "" then
         local empty = {}
         emit_event(context, "searched", empty)
         return empty
     end
 
-    local items, error_message = search_nixpkgs(context, search_term)
+    local items, error_message = search_installable(context, source_ref, search_term)
     if items == nil then
         emit_event(context, "searched", {})
         if context ~= nil and context.log ~= nil and type(context.log.warn) == "function" then
@@ -1189,17 +1206,22 @@ function plugin.resolvePackage(context, package)
         return nil
     end
 
+    local source_ref, attr_fragment, normalized = split_installable(package.name)
     local item = exact_or_first_search_result(context, package.name)
     if item == nil then
-        local installable = normalize_installable(package.name)
+        local installable = normalized ~= "" and normalized or normalize_installable(package.name)
         if installable == "" then
             return nil
         end
 
         return {
-            name = trim(package.name),
+            name = first_non_empty(attr_fragment:match("([^%.]+)$"), derive_name_from_ref(installable), trim(package.name)),
             packageId = installable,
             version = trim(package.version) ~= "" and trim(package.version) or nil,
+            extraFields = copy_string_map({
+                sourceRef = source_ref,
+                requestedAttr = attr_fragment,
+            }),
         }
     end
 
@@ -1207,6 +1229,14 @@ function plugin.resolvePackage(context, package)
         name = item.name,
         packageId = item.packageId,
         version = item.version,
+        homepage = item.homepage,
+        sourceUrl = item.sourceUrl,
+        license = item.license,
+        extraFields = merge_string_maps(item.extraFields, copy_string_map({
+            sourceRef = source_ref,
+            requestedAttr = attr_fragment,
+            resolvedFrom = normalized,
+        })),
     }
 end
 

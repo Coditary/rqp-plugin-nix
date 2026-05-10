@@ -23,6 +23,13 @@ return {
       success = true,
     },
     {
+      match = "nix search 'nixpkgs' '^delta$' --json --no-pretty",
+      exitCode = 0,
+      stdout = "{\"legacyPackages.x86_64-linux.delta\":{\"pname\":\"delta\",\"version\":\"2.0.0\",\"description\":\"Delta package\"}}\n",
+      stderr = "",
+      success = true,
+    },
+    {
       match = "nix profile upgrade 'delta'",
       exitCode = 0,
       stdout = "upgraded\n",
@@ -34,6 +41,7 @@ return {
     success = true,
     commands = {
       "nix profile list --json --no-pretty",
+      "nix search 'nixpkgs' '^delta$' --json --no-pretty",
       "nix profile upgrade 'delta'"
     },
     events = { "updated", "success" },
