@@ -13,7 +13,7 @@ return {
       success = true,
     },
     {
-      match = "nix profile list --json --no-pretty",
+      match = "nix --extra-experimental-features 'nix-command flakes' profile list --json",
       exitCode = 0,
       stdout = "{\"version\":2,\"elements\":[{\"active\":true,\"attrPath\":\"legacyPackages.x86_64-linux.delta\",\"originalUrl\":\"flake:nixpkgs\",\"storePaths\":[\"/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-delta-1.0.0\"],\"url\":\"github:NixOS/nixpkgs/123\"}]}\n",
       stderr = "",
@@ -23,7 +23,8 @@ return {
   expect = {
     success = true,
     commands = {
-      "nix profile list --json --no-pretty"
+      "command -v 'nix' >/dev/null 2>&1",
+      "nix --extra-experimental-features 'nix-command flakes' profile list --json"
     },
     events = { "listed" },
     resultCount = 1,

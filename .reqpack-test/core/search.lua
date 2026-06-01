@@ -14,7 +14,7 @@ return {
       success = true,
     },
     {
-      match = "nix search 'nixpkgs' 'delta' --json --no-pretty",
+      match = "nix --extra-experimental-features 'nix-command flakes' search --json 'nixpkgs' 'delta'",
       exitCode = 0,
       stdout = "{\"legacyPackages.x86_64-linux.delta\":{\"pname\":\"delta\",\"version\":\"1.0.0\",\"description\":\"Delta package\"}}\n",
       stderr = "",
@@ -24,7 +24,8 @@ return {
   expect = {
     success = true,
     commands = {
-      "nix search 'nixpkgs' 'delta' --json --no-pretty"
+      "command -v 'nix' >/dev/null 2>&1",
+      "nix --extra-experimental-features 'nix-command flakes' search --json 'nixpkgs' 'delta'"
     },
     events = { "searched" },
     resultCount = 1,

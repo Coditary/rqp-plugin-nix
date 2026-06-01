@@ -16,7 +16,7 @@ return {
       success = true,
     },
     {
-      match = "nix profile install 'nixpkgs#delta'",
+      match = "nix --extra-experimental-features 'nix-command flakes' profile install 'nixpkgs#delta'",
       exitCode = 0,
       stdout = "installed\n",
       stderr = "",
@@ -26,7 +26,8 @@ return {
   expect = {
     success = true,
     commands = {
-      "nix profile install 'nixpkgs#delta'"
+      "command -v 'nix' >/dev/null 2>&1",
+      "nix --extra-experimental-features 'nix-command flakes' profile install 'nixpkgs#delta'"
     },
     events = { "installed", "success" },
   }

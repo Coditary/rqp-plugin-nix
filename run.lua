@@ -4,6 +4,9 @@ local PLUGIN_NAME = "Nix Package Manager"
 local PLUGIN_VERSION = "0.1.0"
 local REQUIRED_BINARY = "nix"
 local NIXPKGS_REF = "nixpkgs"
+local NIX_INSTALLER_URL = "https://nixos.org/nix/install"
+local NIX_EXPERIMENTAL_FEATURES = "nix-command flakes"
+local active_nix_binary = nil
 
 local function trim(value)
     return (tostring(value or ""):gsub("^%s+", ""):gsub("%s+$", ""))
@@ -453,8 +456,99 @@ local function exec_run(context, command)
     return reqpack.exec.run(command)
 end
 
-local function command_exists(binary)
-    return reqpack.exec.run("command -v " .. shell_quote(binary) .. " >/dev/null 2>&1").success
+local function command_exists(context, binary)
+    local result = exec_run(context, "command -v " .. shell_quote(binary) .. " >/dev/null 2>&1")
+    return result ~= nil and result.success == true
+end
+
+local function executable_exists(context, path)
+    local value = trim(path)
+    local quoted = shell_quote(value)
+    if value:find("$", 1, true) ~= nil then
+        quoted = '"' .. value:gsub('"', '\\"') .. '"'
+    end
+    local result = exec_run(context, "test -x " .. quoted)
+    return result ~= nil and result.success == true
+end
+
+local function find_existing_nix_binary(context)
+    if active_nix_binary ~= nil and active_nix_binary ~= "$HOME/.nix-profile/bin/nix" then
+        return active_nix_binary
+    end
+
+    if command_exists(context, REQUIRED_BINARY) then
+        active_nix_binary = REQUIRED_BINARY
+        return active_nix_binary
+    end
+
+    local candidates = {
+        "$HOME/.nix-profile/bin/nix",
+        "/nix/var/nix/profiles/default/bin/nix",
+        "/run/current-system/sw/bin/nix",
+    }
+
+    for _, candidate in ipairs(candidates) do
+        if executable_exists(context, candidate) then
+            active_nix_binary = candidate
+            return active_nix_binary
+        end
+    end
+
+    return nil
+end
+
+local function quote_command_path(path)
+    local value = trim(path)
+    if value == REQUIRED_BINARY then
+        return REQUIRED_BINARY
+    end
+    if value:find("$", 1, true) ~= nil then
+        return '"' .. value:gsub('"', '\\"') .. '"'
+    end
+    return shell_quote(value)
+end
+
+local function nix_invocation(binary)
+    return quote_command_path(binary or REQUIRED_BINARY)
+        .. " --extra-experimental-features "
+        .. shell_quote(NIX_EXPERIMENTAL_FEATURES)
+end
+
+local function bootstrap_nix(context)
+    if not command_exists(context, "curl") then
+        return nil, "nix bootstrap requires curl"
+    end
+
+    begin_step(context, "bootstrap nix")
+    local command = "curl -L " .. shell_quote(NIX_INSTALLER_URL) .. " | sh -s -- --no-daemon --yes"
+    local result = exec_run(context, command)
+    if result == nil or result.success ~= true then
+        return nil, "nix bootstrap failed"
+    end
+
+    active_nix_binary = "$HOME/.nix-profile/bin/nix"
+    return active_nix_binary, nil
+end
+
+local function ensure_nix(context)
+    local existing = find_existing_nix_binary(context)
+    if existing ~= nil then
+        return existing, nil
+    end
+
+    return bootstrap_nix(context)
+end
+
+local function reset_nix_cache()
+    active_nix_binary = nil
+end
+
+local function nix_command(context)
+    local binary, error_message = ensure_nix(context)
+    if binary == nil then
+        return nil, error_message
+    end
+    return nix_invocation(binary), nil
 end
 
 local function join_shell_quoted(values)
@@ -742,7 +836,12 @@ local function parse_profile_elements(stdout)
 end
 
 local function get_profile_entries(context)
-    local result = exec_run(context, "nix profile list --json --no-pretty")
+    local nix, command_error = nix_command(context)
+    if nix == nil then
+        return nil, command_error
+    end
+
+    local result = exec_run(context, nix .. " profile list --json")
     if not result.success then
         return nil, "nix profile list failed"
     end
@@ -856,7 +955,12 @@ local function search_installable(context, source_ref, prompt)
         return {}, nil
     end
 
-    local command = "nix search " .. shell_quote(ref) .. " " .. shell_quote(search_term) .. " --json --no-pretty"
+    local nix, command_error = nix_command(context)
+    if nix == nil then
+        return nil, command_error
+    end
+
+    local command = nix .. " search --json " .. shell_quote(ref) .. " " .. shell_quote(search_term)
     local result = exec_run(context, command)
     if not result.success then
         return nil, "nix search failed"
@@ -961,11 +1065,18 @@ function plugin.getCategories()
 end
 
 function plugin.getMissingPackages(packages)
+    reset_nix_cache()
+
     if packages == nil or #packages == 0 then
         return {}
     end
 
-    local result = reqpack.exec.run("nix profile list --json --no-pretty")
+    local binary = find_existing_nix_binary(nil)
+    if binary == nil then
+        return packages
+    end
+
+    local result = exec_run(nil, nix_invocation(binary) .. " profile list --json")
     if not result.success then
         return packages
     end
@@ -998,6 +1109,8 @@ function plugin.getMissingPackages(packages)
 end
 
 function plugin.install(context, packages)
+    reset_nix_cache()
+
     if packages == nil or #packages == 0 then
         return true
     end
@@ -1014,8 +1127,14 @@ function plugin.install(context, packages)
         return true
     end
 
+    local nix, command_error = nix_command(context)
+    if nix == nil then
+        tx_failed(context, command_error)
+        return false
+    end
+
     begin_step(context, "install nix packages")
-    local command = "nix profile install " .. join_shell_quoted(installables)
+    local command = nix .. " profile install " .. join_shell_quoted(installables)
     local result = exec_run(context, command)
     if not result.success then
         tx_failed(context, "nix install failed")
@@ -1028,14 +1147,22 @@ function plugin.install(context, packages)
 end
 
 function plugin.installLocal(context, path)
+    reset_nix_cache()
+
     local installable = trim(path)
     if installable == "" then
         tx_failed(context, "nix local install path missing")
         return false
     end
 
+    local nix, command_error = nix_command(context)
+    if nix == nil then
+        tx_failed(context, command_error)
+        return false
+    end
+
     begin_step(context, "install local nix target")
-    local command = "nix profile install " .. shell_quote(installable)
+    local command = nix .. " profile install " .. shell_quote(installable)
     local result = exec_run(context, command)
     if not result.success then
         tx_failed(context, "nix local install failed")
@@ -1048,6 +1175,8 @@ function plugin.installLocal(context, path)
 end
 
 function plugin.remove(context, packages)
+    reset_nix_cache()
+
     if packages == nil or #packages == 0 then
         return true
     end
@@ -1073,8 +1202,14 @@ function plugin.remove(context, packages)
         return true
     end
 
+    local nix, command_error = nix_command(context)
+    if nix == nil then
+        tx_failed(context, command_error)
+        return false
+    end
+
     begin_step(context, "remove nix packages")
-    local command = "nix profile remove " .. join_shell_quoted(targets)
+    local command = nix .. " profile remove " .. join_shell_quoted(targets)
     local result = exec_run(context, command)
     if not result.success then
         tx_failed(context, "nix remove failed")
@@ -1087,6 +1222,8 @@ function plugin.remove(context, packages)
 end
 
 function plugin.update(context, packages)
+    reset_nix_cache()
+
     if packages == nil or #packages == 0 then
         return true
     end
@@ -1112,8 +1249,14 @@ function plugin.update(context, packages)
         return true
     end
 
+    local nix, command_error = nix_command(context)
+    if nix == nil then
+        tx_failed(context, command_error)
+        return false
+    end
+
     begin_step(context, "update nix packages")
-    local command = "nix profile upgrade " .. join_shell_quoted(targets)
+    local command = nix .. " profile upgrade " .. join_shell_quoted(targets)
     local result = exec_run(context, command)
     if not result.success then
         tx_failed(context, "nix update failed")
@@ -1126,6 +1269,8 @@ function plugin.update(context, packages)
 end
 
 function plugin.list(context)
+    reset_nix_cache()
+
     local entries, error_message = get_profile_entries(context)
     if entries == nil then
         emit_event(context, "listed", {})
@@ -1146,6 +1291,8 @@ function plugin.list(context)
 end
 
 function plugin.outdated(context)
+    reset_nix_cache()
+
     local entries, error_message = get_profile_entries(context)
     if entries == nil then
         emit_event(context, "outdated", {})
@@ -1169,6 +1316,8 @@ function plugin.outdated(context)
 end
 
 function plugin.search(context, prompt)
+    reset_nix_cache()
+
     local source_ref, search_term = extract_search_term(prompt)
     if trim(search_term) == "" then
         local empty = {}
@@ -1190,6 +1339,8 @@ function plugin.search(context, prompt)
 end
 
 function plugin.info(context, name)
+    reset_nix_cache()
+
     local item = exact_or_first_search_result(context, name)
     if item == nil then
         local empty = {}
@@ -1202,6 +1353,8 @@ function plugin.info(context, name)
 end
 
 function plugin.resolvePackage(context, package)
+    reset_nix_cache()
+
     if package == nil or trim(package.name) == "" then
         return nil
     end
@@ -1247,8 +1400,12 @@ function plugin.getSecurityMetadata()
         ecosystemScopes = { "nix" },
         writeScopes = {
             { kind = "user-home-subpath", value = ".nix-profile" },
+            { kind = "user-home-subpath", value = ".nix-defexpr" },
+            { kind = "user-home-subpath", value = ".nix-channels" },
             { kind = "user-home-subpath", value = ".local/state/nix" },
+            { kind = "filesystem", value = "/nix" },
         },
+        networkScopes = { "nixos.org", "github.com", "cache.nixos.org" },
         privilegeLevel = "user",
         osvEcosystem = "NixOS",
         purlType = "nix",
@@ -1256,7 +1413,8 @@ function plugin.getSecurityMetadata()
 end
 
 function plugin.init()
-    return command_exists(REQUIRED_BINARY)
+    active_nix_binary = nil
+    return true
 end
 
 function plugin.shutdown()

@@ -6,7 +6,8 @@ Plugin wraps modern `nix profile` workflow for install, remove, update, and list
 
 ## Behavior
 
-- assumes `nix` already exists on host
+- bootstraps a single-user Nix install with the official installer when no `nix` binary is available
+- passes `--extra-experimental-features 'nix-command flakes'` on every Nix CLI call so `profile` and `search` work without host config changes
 - maps simple names like `hello` to `nixpkgs#hello`
 - keeps explicit installables unchanged, for example `nixpkgs#hello`, `github:owner/repo#pkg`, `.#pkg`, `/path/to/flake`
 - uses `nix profile list --json` for installed-state checks and listing
